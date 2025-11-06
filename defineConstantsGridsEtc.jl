@@ -36,11 +36,14 @@ module DefineConstantsGridsEtc
     end
     Egrid = exp.(Egrid)
 
-    function createUtilityFunctions(σ)
-        u(c)       = c <= 0 ? -1.0e12 : (c^(1 - σ) - 1.0) / (1.0 - σ)
-        u_prime(c) = c <= 0 ?  1.0e12 : c^(-σ)
-        u_prime_inv(u_p) =
-                    u_p > 9.9e11 ? 0.0 : u_p^(-1/σ)
+    function createUtilityFunctions(σ_in)
+        if σ_in == 1.0
+            u = c -> c <= 0.0 ? -1.0e12 : log(c)
+        else
+            u = c -> c <= 0.0 ? -1.0e12 : (c^(1 - σ_in) - 1.0) / (1.0 - σ_in)
+        end
+        u_prime(c)       = c  <= 0.0    ? 1.0e12 :   c^(-σ_in)
+        u_prime_inv(u_p) = u_p > 9.9e11 ? 0.0    : u_p^(-1/σ_in)
 
         return u, u_prime, u_prime_inv
     end
