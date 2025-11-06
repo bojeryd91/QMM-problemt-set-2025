@@ -10,15 +10,17 @@ include("helpFunctions.jl")
 
 # Replace with named tuple?
 @with_kw struct Params
-    σ; β; α
+    σ  = nothing; β  = nothing; α  = nothing;
+    Zₛₛ = nothing; Kₛₛ = nothing; Lₛₛ = nothing;
+    rₛₛ = nothing; wₛₛ = nothing
 end
-params = Params(σ=2.0, β=0.96, α=0.36)
+params = Params(σ=1.0, α=0.11)
 
 ### EGM
 #   Using a guess for k_dec(k⁻, e), r_tp1, w_tp1, we can compute
 #   λ_t = β * E_t[(1 + r_tp1) * u_prime(c_dec(k_tp1, e_tp1))]
 #   and then c_t = u_prime_inv(λ_t)
-function iterateEGM(c_tp1, params_in, wₜ, rₜ, rₜ₊₁)
+function iterateEGM(cₜ₊₁s, params_in, wₜ, rₜ, rₜ₊₁)
     @unpack σ, β = params_in
     _, u_prime, u_prime_inv = createUtilityFunctions(σ)
 
@@ -29,16 +31,17 @@ function iterateEGM(c_tp1, params_in, wₜ, rₜ, rₜ₊₁)
     for (idx_eₜ, eₜ) in enumerate(Egrid)
         
         c_endo = zeros(nA)
-        for idx_kₜ in eachindex(Kgrid)
+        for (idx_kₜ, kₜ) in enumerate(Kgrid)
             # In t, hh was in eₜ and chose kₜ
-            cₜ₊₁s = c_tp1[idx_kₜ, :]
-            λₜ₊₁s = u_prime.(cₜ₊₁s)
-            λₜ    = β * (1 + rₜ₊₁) * λₜ₊₁s'*Pₑ[idx_eₜ, :]
+            cₜ₊₁s_by_e = cₜ₊₁s[idx_kₜ, :]
+            λₜ₊₁s = u_prime.(cₜ₊₁s_by_e)
+            # Period-t marginal utility given they chose kₜ:
+            λₜ    = β * (1 + rₜ₊₁ - δ) * λₜ₊₁s'*Pₑ[idx_eₜ, :]
             cₜ    = u_prime_inv(λₜ)
             c_endo[idx_kₜ] = cₜ
+            # Use BC to get period-t's k⁻ that made hh choose cₜ and kₜ
+            k_endo[idx_kₜ] = (cₜ .+ kₜ .- eₜ*wₜ)./(1.0 + rₜ - δ)
         end
-        # Use BC to get the starting k⁻ that made hh choose cₜ and kₜ
-        k_endo = (c_endo .+ Kgrid .- eₜ*wₜ)./(1.0 + rₜ)
 
         # Interpolate to get c decisions on the exogenous Kgrid
         c_interp = LinearInterpolation(k_endo, c_endo, extrapolation_bc=Line())
