@@ -59,7 +59,7 @@ function getTransitionMatrixFromPolicy(k_dec)
         end
     end
 
-    return Λ
+    return sparse(Λ)
 end
 
 #=
