@@ -167,6 +167,191 @@ xlabel!("Assets k"); ylabel!("Consumption c")
 display(fig)
 
 fig =
-plot(Kgrid, tmp_Dₛₛ.*100.0, label=""); title!("Steady state distribution over assets")
+plot(Kgrid, tmp_Dₛₛ.*100.0, label="");
+title!("Steady state distribution over assets")
 xlabel!("Assets k"); ylabel!("Density (%)")
 display(fig)
+
+sub_idx = Kgrid .<= 30.0
+fig =
+plot(Kgrid[sub_idx], tmp_Dₛₛ[sub_idx].*100.0, label="");
+title!("Steady state distribution over assets")
+xlabel!("Assets k"); ylabel!("Density (%)")
+display(fig)
+
+################################################################################
+### Simulate model at steady state
+################################################################################
+function simulateAtSteadyState(N_hhs, ss_in, T)
+    @unpack cₛₛ, kₛₛ, Dₛₛ = ss_in
+    
+    ### Interpolation objects
+    k_itp = LinearInterpolation((Kgrid, Egrid), kₛₛ, extrapolation_bc=Line())
+
+    ### Simulate each household over T periods
+    CDF_Dₛₛ = cumsum(Dₛₛ)
+    all_ks = zeros(N_hhs, T+1)
+    idx_k₀s = Array{Int}(undef, N_hhs)
+    @threads for ID in 1:N_hhs
+
+        ### Sample initial states
+        i_state = searchsortedfirst(CDF_Dₛₛ, rand())
+        idx_k₀ = ceil(Int, i_state/nE)
+        idx_k₀s[ID] = idx_k₀
+        idx_eₜ = i_state - (idx_k₀ - 1)*nE
+        eₜ = Egrid[idx_eₜ]; k⁻ₜ = Kgrid[idx_k₀]
+
+        # Initialize storage
+        ks = zeros(T+1)
+        ks[1] = k⁻ₜ
+    #=
+    end
+        tmp_Dₛₛ = vec(sum(reshape(Dₛₛ, nE, nA), dims=1))
+        share_per_k = counts(idx_k₀s, 1:nA)./N_hhs
+
+        fig =
+        plot( share_per_k)
+        plot!(tmp_Dₛₛ); display(fig)
+        sum(share_per_k.*Kgrid)
+    =#
+
+        @inbounds for t in 2:T+1
+            # Get saving decision today
+            kₜ = k_itp(k⁻ₜ, eₜ)
+
+            # Sample tomorrow's e state
+            this_CDF_e = cumsum(Pₑ[idx_eₜ, :])
+            idx_eₜ₊₁ = searchsortedfirst(this_CDF_e, rand())
+            eₜ = Egrid[idx_eₜ₊₁]; idx_eₜ = idx_eₜ₊₁
+
+            # Store results
+            ks[t] = kₜ; k⁻ₜ   = kₜ
+        end
+        all_ks[ID, :] = ks
+    end
+
+    return vec(sum(all_ks, dims=1)./N_hhs)
+end
+
+ss = (cₛₛ=cₛₛ, kₛₛ=kₛₛ, Zₛₛ=Zₛₛ, Kₛₛ=Kₛₛ, Lₛₛ=Lₛₛ, rₛₛ=rₛₛ, wₛₛ=wₛₛ, Dₛₛ=Dₛₛ)
+K_path_sim = simulateAtSteadyState(100_000, ss, 500)
+
+## What happens if we "simulate" using the transition matrix?
+K_path_sim2 = zeros(length(K_path_sim))
+K_path_sim2[1] = sum(Dₛₛ.*repeat(Kgrid, inner=nE))
+Dₜ = Dₛₛ
+for t = 2:length(K_path_sim2)
+    Dₜ = (Λₛₛ')*Dₜ
+    K_path_sim2[t] = sum(Dₜ.*repeat(Kgrid, inner=nE))
+end
+
+fig =
+plot( 1:length(K_path_sim), K_path_sim, label="sim w/ hhs")
+plot!(1:length(K_path_sim), fill(Kₛₛ, length(K_path_sim)), label="actual ss")
+plot!(1:length(K_path_sim), K_path_sim2, label="sim using Λₛₛ", ls=:dash)
+
+################################################################################
+### Sequence Space Jacobian to compute transition dynamics
+################################################################################
+
+### Get policy functions following a shock to r or w in T-1 (hhs become aware of
+### the shock in perido 0) using Brute Force Method
+function get_Ks_given_rws(r_path, w_path, params_in, c_dec_ss=nothing)
+
+    # For when ForwardDiff passes its input
+    println("Hej :D")
+    this_type = eltype(r_path.+w_path)
+    println(this_type)
+
+    T = length(r_path)
+    c_decs = zeros(this_type, T, nA, nE)
+    k_decs = zeros(this_type, T, nA, nE)
+    Ds     = zeros(this_type, T, nA*nE)
+    Ks     = zeros(this_type, T)
+
+    if c_dec_ss === nothing
+        cₛₛ, kₛₛ, _ = solveSSforHHProblem(params_in)
+        Dₛₛ = inv_dist(getTransitionMatrixFromPolicy(kₛₛ))
+    else
+        println("Implement!"); kk
+    end
+    
+    # Whatever the length of the path, assume that we then return to the steady
+    #   state
+    # So, in T, households expect rₛₛ and use the steady state policy when
+    # forming expectations. Wage and interest rate is given by w_path[T] and
+    #   r_path[T]
+    c_T, k_T = iterateEGM(cₛₛ, params_in, w_path[end], r_path[end], rₛₛ)
+    c_decs[end, :, :] = c_T; k_decs[end, :, :] = k_T
+
+    # Iterate backwards to get policies for t = T-1, T-2, ..., 1, 0
+    cₜ₊₁ = c_T
+    for t = T-1:-1:1
+        cₜ, kₜ = iterateEGM(cₜ₊₁, params_in, w_path[t], r_path[t], r_path[t+1])
+        c_decs[t, :, :] = cₜ; k_decs[t, :, :] = kₜ
+        cₜ₊₁ = cₜ
+    end
+
+    # Iterate forwards to get distributions for t = 0, 1, ..., T
+    Dₜ = Dₛₛ
+    for t = 1:T
+        Λₜ = getTransitionMatrixFromPolicy(k_decs[t, :, :])
+        Dₜ = (Λₜ')*Dₜ
+        Ds[t, :] = Dₜ
+        Ks[t] = sum(Dₜ.*repeat(Kgrid, inner=nE))
+    end
+
+    return Ks
+end
+
+### Re-do steady-state simulation using above command
+r_path = fill(rₛₛ, 300); w_path = fill(wₛₛ, length(r_path))
+K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+
+fig = plot(K_path .- Kₛₛ)
+title!("K_t - Kₛₛ when using general function to simulate")
+display(fig)
+
+### Adding a shock in period s = 1
+dx = 10.0e-4
+r_path = fill(rₛₛ, 300); r_path[1] = rₛₛ + dx
+w_path = fill(wₛₛ, length(r_path))
+
+K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+
+fig = plot(K_path, label="Kₜ")
+plot!(fill(Kₛₛ, length(K_path)), label="Kₛₛ", ls=:dash)
+display(fig)
+
+################################################################################
+### Compute Jacobian Jᴷʳₜ₀ using Brute Force method
+T = 300; dx = rₛₛ*0.01
+
+### Iterate over all s ∈ {1, ..., T}
+#=K_paths = Array{Float64}(undef, T, T)
+@threads for i_s in 1:T
+    r_path = fill(rₛₛ, 300); r_path[i_s] = rₛₛ + dx
+    K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+    K_paths[i_s, :] = K_path
+end
+
+J_Kr = (K_paths .- Kₛₛ)./dx
+
+fig =
+plot( J_Kr[1,   :], label="s=1")
+plot!(J_Kr[25,  :], label="s=25")
+plot!(J_Kr[50,  :], label="s=50")
+plot!(J_Kr[75,  :], label="s=75")
+plot!(J_Kr[100, :], label="s=100")
+=#
+################################################################################
+### Trying auto differentiation in only rₛ
+using ForwardDiff
+
+r_path = fill(rₛₛ, 300); w_path = fill(wₛₛ, length(r_path))
+function to_diff(x) # ::AbstractVector{T}) where T
+    return get_Ks_given_rws(x, w_path, params_calibrated)
+end
+y = to_diff(r_path)
+
+J_Kr_v2 = ForwardDiff.jacobian(to_diff, r_path)
