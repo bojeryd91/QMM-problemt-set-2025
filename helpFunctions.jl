@@ -28,7 +28,8 @@ end
          P(k⁻ₙₐ, eₙₑ)] 
 =#
 function getTransitionMatrixFromPolicy(k_dec)
-    Λ = zeros(nA*nE, nA*nE)
+    this_type = eltype(k_dec)
+    Λ = zeros(this_type, nA*nE, nA*nE)
 
     for idx_e in eachindex(Egrid), idx_k⁻ in eachindex(Kgrid)
         k = k_dec[idx_k⁻, idx_e]
