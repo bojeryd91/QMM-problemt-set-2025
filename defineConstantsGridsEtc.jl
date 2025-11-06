@@ -3,12 +3,14 @@
 =#
 
 module DefineConstantsGridsEtc
-    export ρₑ, σₑ, nE, nA, kmin, kmax, Kgrid, Egrid, Pₑ,
+    export ρₑ, σₑ, δ, nE, nA, kmin, kmax, Kgrid, Egrid, Pₑ,
             createUtilityFunctions
 
     using Distributions
 
     ρₑ = 0.966; σₑ = 0.5
+
+    δ = 0.025
 
     nE = 7; nA = 500; kmin = 0.0; kmax = 200.0
 
