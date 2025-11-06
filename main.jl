@@ -82,12 +82,18 @@ function solveSSforHHProblem(c_guess, wₛₛ, rₛₛ, params)
     return c_decs, k_decs, iter
 end
 
-function solveSSforHHProblem(wₛₛ, rₛₛ, params)
+function solveSSforHHProblem(wₛₛ, rₛₛ, params_in)
+    # Construct a guess
     c_guess = zeros(nA, nE)
     for i in 1:nA, j in 1:nE
         c_guess[i, j] = 0.5 * (wₛₛ*Egrid[j] + rₛₛ*Kgrid[i])
     end
-    return solveSSforHHProblem(c_guess, wₛₛ, rₛₛ, params)
+    return solveSSforHHProblem(c_guess, wₛₛ, rₛₛ, params_in)
+end
+
+function solveSSforHHProblem(params_in)
+    @unpack rₛₛ, wₛₛ = params_in
+    return solveSSforHHProblem(wₛₛ, rₛₛ, params_in)
 end
 
 function calibrateModel(KoverY_target, params_in)
@@ -109,9 +115,9 @@ function calibrateModel(KoverY_target, params_in)
 
     # Find the β so that the households' savings imply the correct Kₛₛ given
     # the current guess for rₛₛ
-    function getKssGiven_r_target(β_guess)
+    function getKssGivenTarget(β_guess)
         params_guess = Params(σ=params_in.σ, β=β_guess, α=params_in.α)
-        _, k_ss, _ = solveSSforHHProblem(wₛₛ, r_target, params_guess)
+        _, k_ss, _ = solveSSforHHProblem(wₛₛ, rₛₛ, params_guess)
 
         ## Compute aggregate capital stock given the policy function implied
         #   by the current guess of (β, r)
@@ -127,8 +133,13 @@ function calibrateModel(KoverY_target, params_in)
     β_min = 0.90; β_max = 1/(1+rₛₛ-δ)
     β_sol = find_zero(getKssGivenTarget, (β_min, β_max))
 
+    # Get transition matrix and invariant distribution too
+    params_final = Params(σ=params_in.σ, β=β_sol, α=params_in.α)
+    cₛₛ, kₛₛ, _ = solveSSforHHProblem(wₛₛ, rₛₛ, params_final)
+    Λₛₛ = getTransitionMatrixFromPolicy(kₛₛ)
+    Dₛₛ = inv_dist(Λₛₛ)
 
-    return β_sol, Kₛₛ, Zₛₛ, wₛₛ, Lₛₛ
+    return β_sol, Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ
 end
 
 KoverY_target = 0.11/0.035
@@ -144,9 +155,9 @@ tmp_Dₛₛ = vec(sum(reshape(Dₛₛ, nE, nA), dims=1))
 ##  Plot policy functions
 sub_idx = Kgrid .<= 5.0
 fig =
-plot( Kgrid[sub_idx], c_dec_ss[sub_idx, 1],   label="c(e₁)")
-plot!(Kgrid[sub_idx], c_dec_ss[sub_idx, 3],   label="c(e₂)")
-plot!(Kgrid[sub_idx], c_dec_ss[sub_idx, end], label="c(eₙₑ)")
+plot( Kgrid[sub_idx], cₛₛ[sub_idx, 1],   label="c(e₁)")
+plot!(Kgrid[sub_idx], cₛₛ[sub_idx, 3],   label="c(e₂)")
+plot!(Kgrid[sub_idx], cₛₛ[sub_idx, end], label="c(eₙₑ)")
 title!("Steady state consumption decisions");
 xlabel!("Assets k"); ylabel!("Consumption c")
 display(fig)
