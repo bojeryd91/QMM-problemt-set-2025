@@ -90,22 +90,22 @@ function solveSSforHHProblem(wₛₛ, rₛₛ, params)
     return solveSSforHHProblem(c_guess, wₛₛ, rₛₛ, params)
 end
 
-function calibrateModel(r_target, params_in)
+function calibrateModel(KoverY_target, params_in)
     @unpack α = params_in
 
-    # Compute labor supply (independent of the guess)
+    # Compute labor supply (this is independent of the guess)
     Deₛₛ = inv_dist(Pₑ) # P(e = eⱼ) in steady state
     Lₛₛ = sum(Deₛₛ .* Egrid)
 
-    # Get Kₛₛ / Yₛₛ from firm's FOCs
-    KoverYₛₛ = α/r_target
+    # Get rₛₛ from firm's capital FOC
+    rₛₛ = α/KoverY_target  # r = α*Y/K
     # Set Yₛₛ = 1 to get Kₛₛ   (only at steady state!)
-    Kₛₛ = KoverYₛₛ
+    Kₛₛ = KoverY_target
     # This implies what Zₛₛ has to be  (again, only at steady state!)
-    Zₛₛ = 1 / (Kₛₛ^(1 - α) * Lₛₛ^(-α))
+    Zₛₛ = 1 / (Kₛₛ^α * Lₛₛ^(1.0-α))
 
-    # By firm's FOCs, we can get the steady state wage given r_target
-    wₛₛ = (1-α)*Zₛₛ*(Kₛₛ/Lₛₛ)^α
+    # By firm's FOCs, we can get the steady state wage given Lₛₛ
+    wₛₛ = (1-α)*1.0/Lₛₛ
 
     # Find the β so that the households' savings imply the correct Kₛₛ given
     # the current guess for rₛₛ
@@ -131,13 +131,14 @@ function calibrateModel(r_target, params_in)
     return β_sol, Kₛₛ, Zₛₛ, wₛₛ, Lₛₛ
 end
 
-rₛₛ = 0.04
-β_calibrated, Kₛₛ, Zₛₛ, wₛₛ, Lₛₛ = calibrateModel(rₛₛ, params)
+KoverY_target = 0.11/0.035
+β_calibrated, Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ =
+                    calibrateModel(KoverY_target, params)
 
-### Get household policy functions given calibrated parameters
-params_calibrated = Params(σ=params.σ, β=β_calibrated, α=params.α)
-c_dec_ss, k_dec_ss, _ = solveSSforHHProblem(wₛₛ, rₛₛ, params)
-Dₛₛ = inv_dist(getTransitionMatrixFromPolicy(k_dec_ss))
+params_calibrated = Params(β=β_calibrated, σ=params.σ, α=params.α,
+                                                        rₛₛ=rₛₛ, wₛₛ=wₛₛ)
+
+### Check aggregates and look at policy functions
 tmp_Dₛₛ = vec(sum(reshape(Dₛₛ, nE, nA), dims=1))
 
 ##  Plot policy functions
