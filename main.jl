@@ -46,14 +46,14 @@ function iterateEGM(cₜ₊₁s, params_in, wₜ, rₜ, rₜ₊₁)
         # Interpolate to get c decisions on the exogenous Kgrid
         c_interp = LinearInterpolation(k_endo, c_endo, extrapolation_bc=Line())
         c_exog = c_interp.(Kgrid)
-        k_exog = (1.0 + rₜ).*Kgrid .+ eₜ*wₜ .- c_exog
+        k_exog = (1.0 + rₜ - δ).*Kgrid .+ eₜ*wₜ .- c_exog
 
         # For the cases when borrowing constraint was violated, Euler equation
         # does not apply and we have to set kₜ = 0.0 and use budget constraint
         # to get cₜ
         bc_viol = k_exog .<= 0.0
         k_exog[bc_viol] .= kmin
-        c_exog[bc_viol] .= (1 + rₜ)*Kgrid[bc_viol] .+ eₜ*wₜ .- kmin
+        c_exog[bc_viol] .= (1 + rₜ - δ)*Kgrid[bc_viol] .+ eₜ*wₜ .- kmin
 
         # Save to result matrices
         c_decs[:, idx_eₜ] = c_exog
@@ -124,9 +124,9 @@ function calibrateModel(KoverY_target, params_in)
         
         return K_agg/Kₛₛ - 1.0
     end
-    β_min = 0.90; β_max = 1/(1+r_target)*1.01
-    β_sol = find_zero(getKssGiven_r_target, (β_min, β_max))
-    #β_sol = optimize(getKssGiven_r_target, β_min, β_max).minimizer
+    β_min = 0.90; β_max = 1/(1+rₛₛ-δ)
+    β_sol = find_zero(getKssGivenTarget, (β_min, β_max))
+
 
     return β_sol, Kₛₛ, Zₛₛ, wₛₛ, Lₛₛ
 end
