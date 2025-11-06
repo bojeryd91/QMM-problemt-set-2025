@@ -24,13 +24,17 @@ function iterateEGM(cₜ₊₁s, params_in, wₜ, rₜ, rₜ₊₁)
     @unpack σ, β = params_in
     _, u_prime, u_prime_inv = createUtilityFunctions(σ)
 
+    # For when ForwardDiff passes inputs
+    this_type = eltype(rₜ + wₜ)
+
     # Given the consumption rule at t+1 per state (k⁻, e), compute
     # the Eₜ[λₜ₊₁(1+rₜ₊₁)] having chosen k = k⁻ in t
-    c_decs = zeros(nA, nE); k_decs = zeros(nA, nE)
+    c_decs = zeros(this_type, nA, nE)
+    k_decs = zeros(this_type, nA, nE)
 
     for (idx_eₜ, eₜ) in enumerate(Egrid)
         
-        c_endo = zeros(nA)
+        c_endo = zeros(this_type, nA); k_endo = zeros(this_type, nA)
         for (idx_kₜ, kₜ) in enumerate(Kgrid)
             # In t, hh was in eₜ and chose kₜ
             cₜ₊₁s_by_e = cₜ₊₁s[idx_kₜ, :]
