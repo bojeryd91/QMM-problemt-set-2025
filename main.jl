@@ -3,7 +3,7 @@
 =#
 
 using Parameters, Interpolations, Plots, LinearAlgebra, SparseArrays,
-        Optim, Roots
+        Roots, Base.Threads, StatsBase
 
 include("defineConstantsGridsEtc.jl")
 include("helpFunctions.jl")
