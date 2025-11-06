@@ -49,9 +49,9 @@ function iterateEGM(cₜ₊₁s, params_in, wₜ, rₜ, rₜ₊₁)
         k_exog = (1.0 + rₜ - δ).*Kgrid .+ eₜ*wₜ .- c_exog
 
         # For the cases when borrowing constraint was violated, Euler equation
-        # does not apply and we have to set kₜ = 0.0 and use budget constraint
+        # does not apply and we have to set kₜ = kmin and use budget constraint
         # to get cₜ
-        bc_viol = k_exog .<= 0.0
+        bc_viol = k_exog .< kmin
         k_exog[bc_viol] .= kmin
         c_exog[bc_viol] .= (1 + rₜ - δ)*Kgrid[bc_viol] .+ eₜ*wₜ .- kmin
 
