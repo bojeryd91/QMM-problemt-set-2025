@@ -146,6 +146,7 @@ function calibrateModel(KoverY_target, params_in)
     return β_sol, Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ
 end
 
+println("Calibrating the model and finding its steady state")
 KoverY_target = 0.11/0.035
 β_calibrated, Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ =
                     calibrateModel(KoverY_target, params)
@@ -204,16 +205,6 @@ function simulateAtSteadyState(N_hhs, ss_in, T)
         # Initialize storage
         ks = zeros(T+1)
         ks[1] = k⁻ₜ
-    #=
-    end
-        tmp_Dₛₛ = vec(sum(reshape(Dₛₛ, nE, nA), dims=1))
-        share_per_k = counts(idx_k₀s, 1:nA)./N_hhs
-
-        fig =
-        plot( share_per_k)
-        plot!(tmp_Dₛₛ); display(fig)
-        sum(share_per_k.*Kgrid)
-    =#
 
         @inbounds for t in 2:T+1
             # Get saving decision today
@@ -249,6 +240,9 @@ fig =
 plot( 1:length(K_path_sim), K_path_sim, label="sim w/ hhs")
 plot!(1:length(K_path_sim), fill(Kₛₛ, length(K_path_sim)), label="actual ss")
 plot!(1:length(K_path_sim), K_path_sim2, label="sim using Λₛₛ", ls=:dash)
+display(fig)
+
+fig = histogram(K_path_sim2 .- Kₛₛ); display(fig)
 
 ################################################################################
 ### Sequence Space Jacobian to compute transition dynamics
@@ -259,9 +253,7 @@ plot!(1:length(K_path_sim), K_path_sim2, label="sim using Λₛₛ", ls=:dash)
 function get_Ks_given_rws(r_path, w_path, params_in, c_dec_ss=nothing)
 
     # For when ForwardDiff passes its input
-    println("Hej :D")
     this_type = eltype(r_path.+w_path)
-    println(this_type)
 
     T = length(r_path)
     c_decs = zeros(this_type, T, nA, nE)
