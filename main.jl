@@ -319,23 +319,38 @@ display(fig)
 ### Compute Jacobian Jᴷʳₜ₀ using Brute Force method
 T = 300; dx = rₛₛ*0.01
 
+#=
 ### Iterate over all s ∈ {1, ..., T}
-#=K_paths = Array{Float64}(undef, T, T)
-@threads for i_s in 1:T
-    r_path = fill(rₛₛ, 300); r_path[i_s] = rₛₛ + dx
-    K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
-    K_paths[i_s, :] = K_path
+function getJacobianBF()
+    done_counter = 0
+    K_paths = Array{Float64}(undef, T, T)
+    print("\e[2K\e[1G0.0% done")
+    @threads for i_s in 1:T
+        r_path = fill(rₛₛ, 300); r_path[i_s] = rₛₛ + dx
+        K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+        K_paths[:, i_s] = K_path
+        done_counter += 1
+        str = @sprintf("%3.2f%% done", done_counter/T*100)
+        print("\e[2K\e[1G", str)
+    end
+    print("\e[2K\e[1G100.0% done\n")
+    return (K_paths .- Kₛₛ)./dx 
 end
 
-J_Kr = (K_paths .- Kₛₛ)./dx
+@time getJacobianBF
+
+J_Kr_w_BF = getJacobianBF();
 
 fig =
-plot( J_Kr[1,   :], label="s=1")
-plot!(J_Kr[25,  :], label="s=25")
-plot!(J_Kr[50,  :], label="s=50")
-plot!(J_Kr[75,  :], label="s=75")
-plot!(J_Kr[100, :], label="s=100")
+plot( J_Kr_w_BF[:,   1], label="s=1")
+plot!(J_Kr_w_BF[:,  25], label="s=25")
+plot!(J_Kr_w_BF[:,  50], label="s=50")
+plot!(J_Kr_w_BF[:,  75], label="s=75")
+plot!(J_Kr_w_BF[:, 100], label="s=100")
+title!("Using manual differentiation")
+display(fig)
 =#
+
 ################################################################################
 ### Trying auto differentiation in only rₛ
 using ForwardDiff
