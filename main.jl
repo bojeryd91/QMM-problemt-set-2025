@@ -354,7 +354,7 @@ display(fig)
 ################################################################################
 ### Trying auto differentiation in only rₛ
 using ForwardDiff
-
+#=
 r_path = fill(rₛₛ, 300); w_path = fill(wₛₛ, length(r_path))
 function to_diff(x) # ::AbstractVector{T}) where T
     return get_Ks_given_rws(x, w_path, params_calibrated)
