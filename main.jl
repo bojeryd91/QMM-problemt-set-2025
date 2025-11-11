@@ -356,9 +356,217 @@ display(fig)
 using ForwardDiff
 #=
 r_path = fill(rₛₛ, 300); w_path = fill(wₛₛ, length(r_path))
-function to_diff(x) # ::AbstractVector{T}) where T
-    return get_Ks_given_rws(x, w_path, params_calibrated)
+function to_diff(rw_in)
+    return get_Ks_given_rws(rw_in[1:T], rw_in[T+1:end], params_calibrated)
 end
-y = to_diff(r_path)
+y = to_diff(vcat(r_path, w_path))
 
-J_Kr_v2 = ForwardDiff.jacobian(to_diff, r_path)
+function getJacobianBF_w_ForwardDiff()
+    return ForwardDiff.jacobian(to_diff, vcat(r_path, w_path))
+end
+
+@time getJacobianBF_w_ForwardDiff()
+
+J_K_BF_w_ForwardDiff = getJacobianBF_w_ForwardDiff()
+J_Kr = J_K_BF_w_ForwardDiff[:,   1:T]
+J_Kw = J_K_BF_w_ForwardDiff[:, T+1:end]
+
+fig =
+plot( J_Kr[:,   1], label="s=1")
+plot!(J_Kr[:,  25], label="s=25")
+plot!(J_Kr[:,  50], label="s=50")
+plot!(J_Kr[:,  75], label="s=75")
+plot!(J_Kr[:, 100], label="s=100")
+title!("Jᴷʳₜₛ, using ForwardDiff")
+display(fig)
+
+fig =
+plot( J_Kw[:,   1], label="s=1")
+plot!(J_Kw[:,  25], label="s=25")
+plot!(J_Kw[:,  50], label="s=50")
+plot!(J_Kw[:,  75], label="s=75")
+plot!(J_Kw[:, 100], label="s=100")
+title!("Jᴷʷₜₛ, using ForwardDiff")
+display(fig)
+=#
+################################################################################
+### Construct H matrices and compute impulse response do standard dev.
+#   shock to TFP
+#=
+α = params_calibrated.α
+∂rₜ∂Kₜ =    α *(α-1)*Zₛₛ*(Kₛₛ)^(α-2)*(Lₛₛ)^(-α+1)
+∂wₜ∂Kₜ = (1-α)*( -α)*Zₛₛ*(Kₛₛ)^(α)  *(Lₛₛ)^(-α-1)
+H_K = J_Kr.*∂rₜ∂Kₜ .+ J_Kw.*∂wₜ∂Kₜ - I
+
+∂rₜ∂Zₜ =    α *(Kₛₛ)^(α-1)*(Lₛₛ)^(1-α)
+∂wₜ∂Zₜ = (1-α)*(Kₛₛ)^(α)  *(Lₛₛ)^( -α)
+H_Z   = J_Kr*∂rₜ∂Zₜ .+ J_Kw*∂wₜ∂Zₜ - I
+
+### Produce shock sequence
+ρ = 0.9; shock_size = 0.01; i_s=20
+logZₜ = fill(log(Zₛₛ), T); logZₜ[i_s] = log(Zₛₛ) + shock_size
+for i_t = i_s+1:T
+    logZₜ[i_t] = (1-ρ)*log(Zₛₛ) + ρ*logZₜ[i_t-1]
+end
+Z_path = exp.(logZₜ)
+plot(Z_path)
+dz = Z_path .- Zₛₛ
+
+G  = -inv(H_K)*H_Z
+dK = G*dz
+plot(dK)
+
+K_path = Kₛₛ .+ dK
+r_path = Z_path.*(K_path).^(α-1.0).*(α*Lₛₛ^(1-α))
+w_path = Z_path.*(K_path).^(α).*((1-α)*Lₛₛ^(-α))
+
+T_disp = 50
+plot( (Z_path[1:T_disp] .- Zₛₛ)./Zₛₛ, label="Dev. in Zₜ")
+plot!((K_path[1:T_disp] .- Kₛₛ)./Kₛₛ, label="Dev. in Kₜ")
+plot!((r_path[1:T_disp] .- rₛₛ)./rₛₛ, label="Dev. in rₜ")
+plot!((w_path[1:T_disp] .- wₛₛ)./wₛₛ, label="Dev. in wₜ")
+title!("Deviations from steady state")
+
+fig =
+plot(0:(T_disp-1), G[1:T_disp, [5,10,15,20,25]],
+            labels = ["s=5" "s=10"	"s=15" "s=20" "s=25"])
+title!("News shock at time s")
+display(fig)
+=#
+################################################################################
+### Using Fake News algorithm
+function get_Ys_and_Ds(rw_in, params_in, c_dec_ss=nothing)
+
+    # For when ForwardDiff passes its input
+    this_type = eltype(rw_in)
+
+    if c_dec_ss === nothing
+        cₛₛ, kₛₛ, _ = solveSSforHHProblem(params_in)
+        Dₛₛ = inv_dist(getTransitionMatrixFromPolicy(kₛₛ))
+    else
+        println("Implement!"); kk
+    end
+
+    cₜ₊₁   = zeros(this_type, size(cₛₛ)); cₜ₊₁ .= cₛₛ
+    K_path = zeros(this_type, T)
+    D_path = zeros(this_type, length(Dₛₛ), T)
+    
+    # Given a change in period T's interest rate or wage, compute backwards
+    # the changes in the aggregate K and distribution D
+    for (i_t, t) in enumerate(Iterators.Reverse(1:T))
+        if t == T # In the last period/first iteration, everything is back to
+                  # steady state but today's wage or interest is different
+            cₜ₊₁, kₜ = iterateEGM(cₛₛ,  params_in, rw_in[1], rw_in[2], rₛₛ)
+        elseif t == T-1 # In the penultimate period/second iteration,
+                        # today's wage and r are at steady state but
+                        # tomorrow's interest rate might be different
+            cₜ₊₁, kₜ = iterateEGM(cₜ₊₁, params_in, rₛₛ,      wₛₛ,      rw_in[1])
+        else # Otherwise, wages and interest rates are at steady state but
+             # tomorrow's policy function is different
+            cₜ₊₁, kₜ = iterateEGM(cₜ₊₁, params_in, rₛₛ,      wₛₛ,      rₛₛ)
+        end
+        
+        # Use '[:] to reshape k_t from 𝐑ⁿᵃ×𝐑ⁿᵉ to 𝐑ⁿᵉ ⁿᵃ, sorted first by e,
+        # just like Dₛₛ
+        K_path[i_t] = (kₜ'[:])'*Dₛₛ
+
+        # Compute new in distribution using this periods transition matrix
+        Λₜ = getTransitionMatrixFromPolicy(kₜ)
+        D_path[:, i_t] .= Λₜ'*Dₛₛ
+    end
+    
+    return vcat(K_path, D_path[:])
+end
+
+function get_J(Ks, Ds)
+    ### Construct the Fake News matrix
+    F = zeros(T, T)
+    F[1, :] = Ks[:]
+    E = kₛₛ'[:]
+    for i_t = 2:T
+        for i_s = 1:T
+            F[i_t, i_s] = E'*Ds[:, :, i_s][:]
+        end
+        E = Λₛₛ*E
+    end
+
+    ### Construct the Jacobian using F
+    J = zeros(T, T)
+    J[1, :] .= F[1, :]; J[:, 1] .= F[:, 1]
+    for i_s = 2:T
+        @views J[2:T, i_s] .= J[1:T-1, i_s-1] .+ F[2:T, i_s]
+    end
+
+    return J
+end
+
+to_diff = function(rw_in)
+    return get_Ys_and_Ds(rw_in, params_calibrated)
+end
+res = ForwardDiff.jacobian(to_diff, vcat(rₛₛ, wₛₛ))
+Ks_r = res[1:T, 1]; Ks_w = res[1:T, 2]
+Ds_r = reshape(res[T+1:end, 1], nE, nA, T)
+Ds_w = reshape(res[T+1:end, 2], nE, nA, T)
+
+Jᵏʳₜₛ = get_J(Ks_r, Ds_r)
+Jᵏʷₜₛ = get_J(Ks_w, Ds_w)
+
+plot(F[:, 1])
+plot( F[:, 25])
+plot!(F[:, 50])
+plot!(F[:, 75])
+plot!(F[:, 100])
+
+fig =
+plot( Jᵏʳₜₛ[:, 1])
+plot!(Jᵏʳₜₛ[:, 26])
+plot!(Jᵏʳₜₛ[:, 51])
+plot!(Jᵏʳₜₛ[:, 76])
+plot!(Jᵏʳₜₛ[:, 101])
+display(fig)
+
+################################################################################
+### Construct H matrices and compute impulse response do standard dev.
+#   shock to TFP
+α = params_calibrated.α
+∂rₜ₊₁∂Kₜ =    α *(α-1)*Zₛₛ*(Kₛₛ)^(α-2)*(Lₛₛ)^(-α+1)
+∂wₜ∂Kₜ   = (1-α)*( -α)*Zₛₛ*(Kₛₛ)^(α)  *(Lₛₛ)^(-α-1)
+H_K      = Jᵏʳₜₛ.*∂rₜ₊₁∂Kₜ .+ Jᵏʷₜₛ.*∂wₜ∂Kₜ - I
+
+∂rₜ₊₁∂Zₜ =    α *(Kₛₛ)^(α-1)*(Lₛₛ)^(1-α)
+∂wₜ∂Zₜ   = (1-α)*(Kₛₛ)^(α)  *(Lₛₛ)^( -α)
+H_Z      = Jᵏʳₜₛ*∂rₜ₊₁∂Zₜ .+ Jᵏʷₜₛ*∂wₜ∂Zₜ - I
+
+### Produce shock sequence
+#   log(Zₜ) = (1-ρ)⋅log(Zₛₛ) + ρ⋅log(Zₜ₋₁) + εₜ
+ρ = 0.9; shock_size = 0.01; i_s=20
+logZₜ = fill(log(Zₛₛ), T); logZₜ[i_s] = log(Zₛₛ) + shock_size
+for i_t = i_s+1:T
+    logZₜ[i_t] = (1-ρ)*log(Zₛₛ) + ρ*logZₜ[i_t-1]
+end
+Z_path = exp.(logZₜ)
+plot(Z_path)
+dz = Z_path .- Zₛₛ
+
+G  = -inv(H_K)*H_Z
+dK = G*dz
+plot(dK)
+
+K_path = Kₛₛ .+ dK
+r_path = Z_path.*(K_path).^(α-1.0).*(   α *Lₛₛ^(1-α))
+w_path = Z_path.*(K_path).^(α    ).*((1-α)*Lₛₛ^( -α))
+
+T_disp = 50
+fig =
+plot( (Z_path[1:T_disp] .- Zₛₛ)./Zₛₛ, label="Dev. in Zₜ")
+plot!((K_path[1:T_disp] .- Kₛₛ)./Kₛₛ, label="Dev. in Kₜ")
+plot!((r_path[1:T_disp] .- rₛₛ)./rₛₛ, label="Dev. in rₜ")
+plot!((w_path[1:T_disp] .- wₛₛ)./wₛₛ, label="Dev. in wₜ")
+title!("Deviations from steady state")
+display(fig)
+
+fig =
+plot(0:(T_disp-1), G[1:T_disp, [5,10,15,20,25]],
+            labels = ["s=5" "s=10"	"s=15" "s=20" "s=25"])
+title!("News shock at time s")
+display(fig)
