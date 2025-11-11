@@ -20,7 +20,7 @@ params = Params(σ=1.0, α=0.11)
 #   Using a guess for k_dec(k⁻, e), r_tp1, w_tp1, we can compute
 #   λ_t = β * E_t[(1 + r_tp1) * u_prime(c_dec(k_tp1, e_tp1))]
 #   and then c_t = u_prime_inv(λ_t)
-function iterateEGM(cₜ₊₁s, params_in, wₜ, rₜ, rₜ₊₁)
+function iterateEGM(cₜ₊₁s, params_in, rₜ, wₜ, rₜ₊₁)
     @unpack σ, β = params_in
     _, u_prime, u_prime_inv = createUtilityFunctions(σ)
 
@@ -71,7 +71,7 @@ function solveSSforHHProblem(c_guess, wₛₛ, rₛₛ, params)
     iter = 0; err = 1.0e10
 
     while iter < max_iter && err > tol
-        c_new, _ = iterateEGM(c_guess, params, wₛₛ, rₛₛ, rₛₛ)
+        c_new, _ = iterateEGM(c_guess, params, rₛₛ, wₛₛ, rₛₛ)
         err = maximum(abs.(c_new .- c_guess))
         c_guess = c_new
         iter += 1
@@ -81,7 +81,7 @@ function solveSSforHHProblem(c_guess, wₛₛ, rₛₛ, params)
         kk
     end
 
-    c_decs, k_decs = iterateEGM(c_guess, params, wₛₛ, rₛₛ, rₛₛ)
+    c_decs, k_decs = iterateEGM(c_guess, params, rₛₛ, wₛₛ, rₛₛ)
 
     return c_decs, k_decs, iter
 end
@@ -281,13 +281,13 @@ function get_Ks_given_rws(r_path, w_path, params_in, c_dec_ss=nothing)
     # So, in T, households expect rₛₛ and use the steady state policy when
     # forming expectations. Wage and interest rate is given by w_path[T] and
     #   r_path[T]
-    c_T, k_T = iterateEGM(cₛₛ, params_in, w_path[end], r_path[end], rₛₛ)
+    c_T, k_T = iterateEGM(cₛₛ, params_in, r_path[end], w_path[end], rₛₛ)
     c_decs[end, :, :] = c_T; k_decs[end, :, :] = k_T
 
     # Iterate backwards to get policies for t = T-1, T-2, ..., 1, 0
     cₜ₊₁ = c_T
     for t = T-1:-1:1
-        cₜ, kₜ = iterateEGM(cₜ₊₁, params_in, w_path[t], r_path[t], r_path[t+1])
+        cₜ, kₜ = iterateEGM(cₜ₊₁, params_in, r_path[t], w_path[t], r_path[t+1])
         c_decs[t, :, :] = cₜ; k_decs[t, :, :] = kₜ
         cₜ₊₁ = cₜ
     end
