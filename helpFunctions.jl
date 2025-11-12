@@ -64,14 +64,14 @@ function getTransitionMatrixFromPolicy(k_dec)
 end
 
 #=
-    Transform value → (y_min, y_max) using the logistic function
+    Transform value x → (y_min, y_max) using the logistic function
 =#
-function logistic(y_in, y_min=0.0, y_max=1.0)
-    return y_min + (y_max - y_min) / (1.0 + exp(-y_in))
+function logistic(x_in, y_min=0.0, y_max=1.0)
+    return y_min + (y_max - y_min) / (1.0 + exp(-x_in))
 end
 #=
     Inverse of the logistic function
 =#
-function logistic_inv(y_out, y_min=0.0, y_max=1.0)
-    return -log((y_max - y_out) / (y_out - y_min))
+function logistic_inv(y_in, y_min=0.0, y_max=1.0)
+    return -log((y_max - y_in) / (y_in - y_min))
 end
