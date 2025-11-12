@@ -8,13 +8,7 @@ using Parameters, Interpolations, Plots, LinearAlgebra, SparseArrays,
 include("defineConstantsGridsEtc.jl")
 include("helpFunctions.jl")
 
-# Replace with named tuple?
-@with_kw struct Params
-    σ  = nothing; β  = nothing; α  = nothing;
-    Zₛₛ = nothing; Kₛₛ = nothing; Lₛₛ = nothing;
-    rₛₛ = nothing; wₛₛ = nothing
-end
-params = Params(σ=1.0, α=0.11)
+const_params = (σ=1.0, α=0.11)
 
 ### EGM
 #   Using a guess for k_dec(k⁻, e), r_tp1, w_tp1, we can compute
@@ -120,7 +114,7 @@ function calibrateModel(KoverY_target, params_in)
     # Find the β so that the households' savings imply the correct Kₛₛ given
     # the current guess for rₛₛ
     function getKssGivenTarget(β_guess)
-        params_guess = Params(σ=params_in.σ, β=β_guess, α=params_in.α)
+        params_guess = merge(params_in, (; β=β_guess))
         _, k_ss, _ = solveSSforHHProblem(wₛₛ, rₛₛ, params_guess)
 
         ## Compute aggregate capital stock given the policy function implied
@@ -138,21 +132,19 @@ function calibrateModel(KoverY_target, params_in)
     β_sol = find_zero(getKssGivenTarget, (β_min, β_max))
 
     # Get transition matrix and invariant distribution too
-    params_final = Params(σ=params_in.σ, β=β_sol, α=params_in.α)
+    params_final = merge(params_in, (; β=β_sol))
     cₛₛ, kₛₛ, _ = solveSSforHHProblem(wₛₛ, rₛₛ, params_final)
     Λₛₛ = getTransitionMatrixFromPolicy(kₛₛ)
     Dₛₛ = inv_dist(Λₛₛ)
 
-    return β_sol, Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ
+    cali_params = (; Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ, α)
+    return merge(cali_params, (; β=β_sol, σ=params_in.σ))
 end
 
 println("Calibrating the model and finding its steady state")
 KoverY_target = 0.11/0.035
-β_calibrated, Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, rₛₛ, wₛₛ, Λₛₛ, Dₛₛ =
-                    calibrateModel(KoverY_target, params)
-
-params_calibrated = Params(β=β_calibrated, σ=params.σ, α=params.α,
-                                                        rₛₛ=rₛₛ, wₛₛ=wₛₛ)
+calibrated_model = calibrateModel(KoverY_target, const_params)
+@unpack (Zₛₛ, Kₛₛ, Lₛₛ, cₛₛ, kₛₛ, Dₛₛ, Λₛₛ, rₛₛ, wₛₛ, α, σ) = calibrated_model
 
 ### Check aggregates and look at policy functions
 tmp_Dₛₛ = vec(sum(reshape(Dₛₛ, nE, nA), dims=1))
@@ -183,8 +175,8 @@ display(fig)
 ################################################################################
 ### Simulate model at steady state
 ################################################################################
-function simulateAtSteadyState(N_hhs, ss_in, T)
-    @unpack cₛₛ, kₛₛ, Dₛₛ = ss_in
+function simulateAtSteadyState(N_hhs, model_in, T)
+    @unpack cₛₛ, kₛₛ, Dₛₛ = model_in
     
     ### Interpolation objects
     k_itp = LinearInterpolation((Kgrid, Egrid), kₛₛ, extrapolation_bc=Line())
@@ -224,21 +216,21 @@ function simulateAtSteadyState(N_hhs, ss_in, T)
     return vec(sum(all_ks, dims=1)./N_hhs)
 end
 
-ss = (cₛₛ=cₛₛ, kₛₛ=kₛₛ, Zₛₛ=Zₛₛ, Kₛₛ=Kₛₛ, Lₛₛ=Lₛₛ, rₛₛ=rₛₛ, wₛₛ=wₛₛ, Dₛₛ=Dₛₛ)
-K_path_sim = simulateAtSteadyState(100_000, ss, 500)
+K_path_sim = simulateAtSteadyState(100_000, calibrated_model, 500)
 
 ## What happens if we "simulate" using the transition matrix?
 K_path_sim2 = zeros(length(K_path_sim))
 K_path_sim2[1] = sum(Dₛₛ.*repeat(Kgrid, inner=nE))
 Dₜ = Dₛₛ
-for t = 2:length(K_path_sim2)
+for t = 2:lastindex(K_path_sim2)
     Dₜ = (Λₛₛ')*Dₜ
     K_path_sim2[t] = sum(Dₜ.*repeat(Kgrid, inner=nE))
 end
 
 fig =
-plot( 1:length(K_path_sim), K_path_sim, label="sim w/ hhs")
-plot!(1:length(K_path_sim), fill(Kₛₛ, length(K_path_sim)), label="actual ss")
+plot( 1:length(K_path_sim), K_path_sim,  label="sim w/ hhs")
+plot!(1:length(K_path_sim), fill(Kₛₛ, length(K_path_sim)),
+                                         label="actual ss")
 plot!(1:length(K_path_sim), K_path_sim2, label="sim using Λₛₛ", ls=:dash)
 display(fig)
 
@@ -250,7 +242,9 @@ fig = histogram(K_path_sim2 .- Kₛₛ); display(fig)
 
 ### Get policy functions following a shock to r or w in T-1 (hhs become aware of
 ### the shock in perido 0) using Brute Force Method
-function get_Ks_given_rws(r_path, w_path, params_in, c_dec_ss=nothing)
+function get_Ks_given_rws(r_path, w_path, params_in)
+
+    @unpack cₛₛ, kₛₛ, Dₛₛ, rₛₛ = params_in
 
     # For when ForwardDiff passes its input
     this_type = eltype(r_path.+w_path)
@@ -260,13 +254,6 @@ function get_Ks_given_rws(r_path, w_path, params_in, c_dec_ss=nothing)
     k_decs = zeros(this_type, T, nA, nE)
     Ds     = zeros(this_type, T, nA*nE)
     Ks     = zeros(this_type, T)
-
-    if c_dec_ss === nothing
-        cₛₛ, kₛₛ, _ = solveSSforHHProblem(params_in)
-        Dₛₛ = inv_dist(getTransitionMatrixFromPolicy(kₛₛ))
-    else
-        println("Implement!"); kk
-    end
     
     # Whatever the length of the path, assume that we then return to the steady
     #   state
@@ -278,7 +265,7 @@ function get_Ks_given_rws(r_path, w_path, params_in, c_dec_ss=nothing)
 
     # Iterate backwards to get policies for t = T-1, T-2, ..., 1, 0
     cₜ₊₁ = c_T
-    for t = T-1:-1:1
+    for t = Iterators.reverse(1:T-1)
         cₜ, kₜ = iterateEGM(cₜ₊₁, params_in, r_path[t], w_path[t], r_path[t+1])
         c_decs[t, :, :] = cₜ; k_decs[t, :, :] = kₜ
         cₜ₊₁ = cₜ
@@ -298,7 +285,7 @@ end
 
 ### Re-do steady-state simulation using above command
 r_path = fill(rₛₛ, 300); w_path = fill(wₛₛ, length(r_path))
-K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+K_path = get_Ks_given_rws(r_path, w_path, calibrated_model)
 
 fig = plot(K_path .- Kₛₛ)
 title!("K_t - Kₛₛ when using general function to simulate")
@@ -309,7 +296,7 @@ dx = 10.0e-4
 r_path = fill(rₛₛ, 300); r_path[1] = rₛₛ + dx
 w_path = fill(wₛₛ, length(r_path))
 
-K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+K_path = get_Ks_given_rws(r_path, w_path, calibrated_model)
 
 fig = plot(K_path, label="Kₜ")
 plot!(fill(Kₛₛ, length(K_path)), label="Kₛₛ", ls=:dash)
@@ -327,7 +314,7 @@ function getJacobianBF()
     print("\e[2K\e[1G0.0% done")
     @threads for i_s in 1:T
         r_path = fill(rₛₛ, 300); r_path[i_s] = rₛₛ + dx
-        K_path = get_Ks_given_rws(r_path, w_path, params_calibrated)
+        K_path = get_Ks_given_rws(r_path, w_path, calibrated_model)
         K_paths[:, i_s] = K_path
         done_counter += 1
         str = @sprintf("%3.2f%% done", done_counter/T*100)
@@ -357,7 +344,7 @@ using ForwardDiff
 #=
 r_path = fill(rₛₛ, 300); w_path = fill(wₛₛ, length(r_path))
 function to_diff(rw_in)
-    return get_Ks_given_rws(rw_in[1:T], rw_in[T+1:end], params_calibrated)
+    return get_Ks_given_rws(rw_in[1:T], rw_in[T+1:end], calibrated_model)
 end
 y = to_diff(vcat(r_path, w_path))
 
@@ -501,7 +488,7 @@ function get_J(Ks, Ds)
 end
 
 to_diff = function(rw_in)
-    return get_Ys_and_Ds(rw_in, params_calibrated)
+    return get_Ys_and_Ds(rw_in, calibrated_model)
 end
 res = ForwardDiff.jacobian(to_diff, vcat(rₛₛ, wₛₛ))
 Ks_r = res[1:T, 1]; Ks_w = res[1:T, 2]
@@ -511,12 +498,13 @@ Ds_w = reshape(res[T+1:end, 2], nE, nA, T)
 Jᵏʳₜₛ = get_J(Ks_r, Ds_r)
 Jᵏʷₜₛ = get_J(Ks_w, Ds_w)
 
+#=
 plot(F[:, 1])
 plot( F[:, 25])
 plot!(F[:, 50])
 plot!(F[:, 75])
 plot!(F[:, 100])
-
+=#
 fig =
 plot( Jᵏʳₜₛ[:, 1])
 plot!(Jᵏʳₜₛ[:, 26])
@@ -528,7 +516,6 @@ display(fig)
 ################################################################################
 ### Construct H matrices and compute impulse response do standard dev.
 #   shock to TFP
-α = params_calibrated.α
 ∂rₜ₊₁∂Kₜ =    α *(α-1)*Zₛₛ*(Kₛₛ)^(α-2)*(Lₛₛ)^(-α+1)
 ∂wₜ∂Kₜ   = (1-α)*( -α)*Zₛₛ*(Kₛₛ)^(α)  *(Lₛₛ)^(-α-1)
 H_K      = Jᵏʳₜₛ.*∂rₜ₊₁∂Kₜ .+ Jᵏʷₜₛ.*∂wₜ∂Kₜ - I
